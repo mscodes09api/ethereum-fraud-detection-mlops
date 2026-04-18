@@ -75,13 +75,47 @@ def predict_fraud(transaction_data: TransactionFeatures, _: str = Depends(verify
         raise HTTPException(status_code=500, detail="Prediction engine unavailable. Check logs.")
     
     try:
+        # 1. Convert the 6 input fields to a DataFrame
         df = pd.DataFrame([transaction_data.model_dump()])
+        
+        # 2. Rename the columns to match the spaces the model expects
+        rename_map = {
+            "Avg_min_between_sent_tnx": "Avg min between sent tnx",
+            "Avg_min_between_received_tnx": "Avg min between received tnx",
+            "Time_Diff_between_first_and_last_Mins": "Time Diff between first and last (Mins)",
+            "Sent_tnx": "Sent tnx",
+            "Received_Tnx": "Received Tnx",
+            "Number_of_Created_Contracts": "Number of Created Contracts"
+        }
+        df = df.rename(columns=rename_map)
+        
+        # 3. The 45 exact columns the model was trained on
+        expected_features = [
+            'Avg min between sent tnx', 'Avg min between received tnx', 'Time Diff between first and last (Mins)', 
+            'Sent tnx', 'Received Tnx', 'Number of Created Contracts', 'Unique Received From Addresses', 
+            'Unique Sent To Addresses', 'min value received', 'max value received ', 'avg val received', 
+            'min val sent', 'max val sent', 'avg val sent', 'min value sent to contract', 'max val sent to contract', 
+            'avg value sent to contract', 'total transactions (including tnx to create contract', 'total Ether sent', 
+            'total ether received', 'total ether sent contracts', 'total ether balance', ' Total ERC20 tnxs', 
+            ' ERC20 total Ether received', ' ERC20 total ether sent', ' ERC20 total Ether sent contract', 
+            ' ERC20 uniq sent addr', ' ERC20 uniq rec addr', ' ERC20 uniq sent addr.1', ' ERC20 uniq rec contract addr', 
+            ' ERC20 avg time between sent tnx', ' ERC20 avg time between rec tnx', ' ERC20 avg time between rec 2 tnx', 
+            ' ERC20 avg time between contract tnx', ' ERC20 min val rec', ' ERC20 max val rec', ' ERC20 avg val rec', 
+            ' ERC20 min val sent', ' ERC20 max val sent', ' ERC20 avg val sent', ' ERC20 min val sent contract', 
+            ' ERC20 max val sent contract', ' ERC20 avg val sent contract', ' ERC20 uniq sent token name', 
+            ' ERC20 uniq rec token name'
+        ]
+        
+        # 4. Pad the missing columns with 0.0 so the model doesn't crash
+        df = df.reindex(columns=expected_features, fill_value=0.0)
+        
+        # 5. Make the prediction!
         prediction = model.predict(df)
         return {"is_fraud": int(prediction[0])}
+        
     except Exception as e:
-        logger.error("Runtime prediction error", exc_info=True)
+        logger.error(f"Runtime prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=422, detail="Unable to process transaction data.")
-
 @app.get("/")
 def health_check():
     return {"status": "Secure API is online", "model_loaded": model is not None}
