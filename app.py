@@ -8,19 +8,19 @@ from pydantic import BaseModel, Field
 import mlflow.xgboost
 import pandas as pd
 
-# Set up logging to prevent leaking stack traces
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Ethereum Fraud Detection API")
 
 # --- 1. Security: CORS Middleware ---
-# Pulling origins from env or defaulting to an empty list to prevent wildcards
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != [""] else ["http://localhost:3000"],
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != [""] else ["*"],
     allow_credentials=False,
-    allow_methods=["POST"],
+    allow_methods=["POST", "GET"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -29,75 +29,58 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
 def verify_api_key(api_key: str = Security(api_key_header)):
-    # FAIL-FAST: No fallback string. If API_KEY is missing from ENV, app returns 500.
     expected_key = os.environ.get("API_KEY") 
     if not expected_key:
-        logger.critical("SECURITY CONFIG ERROR: API_KEY environment variable is NOT SET.")
+        logger.critical("SECURITY CONFIG ERROR: API_KEY is NOT SET.")
         raise HTTPException(status_code=500, detail="Server configuration error.")
     
-    # Use secrets.compare_digest to mitigate timing attacks
     if not secrets.compare_digest(api_key, expected_key):
         raise HTTPException(status_code=403, detail="Invalid or unauthorized API key.")
     return api_key
 
 # --- 3. Security: Strict Input Schema ---
 class TransactionFeatures(BaseModel):
-    # Defining exact types and constraints for the model
     Avg_min_between_sent_tnx: float = Field(..., ge=0)
     Avg_min_between_received_tnx: float = Field(..., ge=0)
     Time_Diff_between_first_and_last_Mins: float
     Sent_tnx: float
     Received_Tnx: float
     Number_of_Created_Contracts: float
-    # Strictly forbid any extra fields not defined in the training set
     model_config = {"extra": "forbid"} 
 
 # --- 4. Load Model securely ---
-# FAIL-FAST: Use os.environ here to crash the app immediately if the ID is missing
-try:
-    RUN_ID = os.environ["MLFLOW_RUN_ID"]
-except KeyError:
-    logger.critical("DEPLOYMENT ERROR: MLFLOW_RUN_ID is missing from environment.")
-    raise RuntimeError("MLFLOW_RUN_ID environment variable is required.")
+mlflow.set_tracking_uri("file:./mlruns")
+RUN_ID = os.environ.get("MLFLOW_RUN_ID")
 
-model_uri = f"runs:/{RUN_ID}/xgb_model"
-
-try:
-    model = mlflow.xgboost.load_model(model_uri)
-except Exception as e:
-    logger.error("Failed to initialize ML model artifact", exc_info=True)
+if not RUN_ID:
+    logger.critical("DEPLOYMENT ERROR: MLFLOW_RUN_ID is missing.")
     model = None
+else:
+    # We point directly to the artifacts folder based on your screenshot structure
+    # Path: mlruns/1/models/m-<RUN_ID>/artifacts
+    model_path = os.path.join(os.getcwd(), "mlruns", "1", "models", f"m-{RUN_ID}", "artifacts")
+    
+    try:
+        logger.info(f"Attempting to load model from: {model_path}")
+        model = mlflow.xgboost.load_model(model_path)
+        logger.info("✅ Model loaded successfully!")
+    except Exception as e:
+        logger.error(f"❌ Failed to load model at {model_path}: {e}")
+        model = None
 
-# FIXED: Now strictly uses TransactionFeatures instead of 'dict' to trigger FastAPI validation
 @app.post("/predict")
 def predict_fraud(transaction_data: TransactionFeatures, _: str = Depends(verify_api_key)):
     if model is None:
-        raise HTTPException(status_code=500, detail="Prediction engine unavailable.")
+        raise HTTPException(status_code=500, detail="Prediction engine unavailable. Check logs.")
     
     try:
-        # Pydantic has already validated types and field counts by this point
         df = pd.DataFrame([transaction_data.model_dump()])
         prediction = model.predict(df)
         return {"is_fraud": int(prediction[0])}
-    
     except Exception as e:
         logger.error("Runtime prediction error", exc_info=True)
-        # Masking internal details from the user
         raise HTTPException(status_code=422, detail="Unable to process transaction data.")
 
 @app.get("/")
 def health_check():
-    return {"status": "Secure API is online"}
-# --- 4. Load Model securely ---
-
-# Add this line so the app knows to look in your local mlruns folder
-mlflow.set_tracking_uri("file:./mlruns")
-
-# This pulls the ID from Render's settings so your code stays clean
-RUN_ID = os.environ.get("MLFLOW_RUN_ID") 
-
-if not RUN_ID:
-    logger.critical("DEPLOYMENT ERROR: MLFLOW_RUN_ID is missing from environment.")
-    raise RuntimeError("MLFLOW_RUN_ID environment variable is required.")
-
-model_uri = f"runs:/{RUN_ID}/xgb_model"
+    return {"status": "Secure API is online", "model_loaded": model is not None}
