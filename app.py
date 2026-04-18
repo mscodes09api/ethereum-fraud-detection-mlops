@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import mlflow.xgboost
+import mlflow.pyfunc  # Change this from mlflow.xgboost
 import pandas as pd
 
 # Set up logging
@@ -62,8 +62,9 @@ else:
     
     try:
         logger.info(f"Attempting to load model from: {model_path}")
-        model = mlflow.xgboost.load_model(model_path)
-        logger.info("✅ Model loaded successfully!")
+        # Use pyfunc instead of xgboost for better compatibility
+        model = mlflow.pyfunc.load_model(model_path)
+        logger.info("✅ Model loaded successfully via pyfunc!")
     except Exception as e:
         logger.error(f"❌ Failed to load model at {model_path}: {e}")
         model = None
