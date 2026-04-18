@@ -88,3 +88,16 @@ def predict_fraud(transaction_data: TransactionFeatures, _: str = Depends(verify
 @app.get("/")
 def health_check():
     return {"status": "Secure API is online"}
+# --- 4. Load Model securely ---
+
+# Add this line so the app knows to look in your local mlruns folder
+mlflow.set_tracking_uri("file:./mlruns")
+
+# This pulls the ID from Render's settings so your code stays clean
+RUN_ID = os.environ.get("MLFLOW_RUN_ID") 
+
+if not RUN_ID:
+    logger.critical("DEPLOYMENT ERROR: MLFLOW_RUN_ID is missing from environment.")
+    raise RuntimeError("MLFLOW_RUN_ID environment variable is required.")
+
+model_uri = f"runs:/{RUN_ID}/xgb_model"
