@@ -1,0 +1,13 @@
+# Secrets and Environment Variables
+.env
+*.env
+.mlflow_run_id
+kaggle.json
+
+# Python artifacts
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Model metadata (optional: ignore if you only want to push the final model)
+mlruns/

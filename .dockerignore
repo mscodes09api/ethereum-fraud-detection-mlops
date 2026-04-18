@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+mlruns/
+.mlflow_run_id
+drift_report.html
+.env
+.git
+.gitignore
+Dockerfile
+tests/
